@@ -115,7 +115,9 @@ runs:
     - name: Upload the release manifest
       id: upload
       if: steps.manifest.outputs.published == 'true'
-      continue-on-error: ${{ inputs.delivery == 'push' }}
+      # Never fatal: when GitHub blocks the upload (Actions storage quota) Dokploy reads the manifest
+      # from this job's log (the "dokploy-release/v1 <payload>" line the manifest step printed).
+      continue-on-error: true
       uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
       with:
         name: dokploy-release
@@ -125,9 +127,14 @@ runs:
         # A re-run attempt replaces the artifact; Dokploy treats an older attempt as superseded.
         overwrite: true
 
+    - name: Artifact upload failed
+      if: steps.manifest.outputs.published == 'true' && steps.upload.outcome == 'failure'
+      shell: bash
+      run: echo "::warning title=dokploy-release::The artifact upload failed; Dokploy reads the manifest from this job's log instead."
+
     - name: Create the GitHub Deployments
-      # Never a wake-up record without its artifact.
-      if: steps.manifest.outputs.published == 'true' && steps.upload.outcome == 'success'
+      # The manifest is in the run artifact or, failing that, in this job's log: either is enough to wake Dokploy.
+      if: steps.manifest.outputs.published == 'true'
       shell: bash
       env:
         INPUT_DELIVERY: ${{ inputs.delivery }}

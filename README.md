@@ -7,6 +7,12 @@ The action holds no Dokploy address and no Dokploy API key. It does two things:
 2. Creates one GitHub Deployment per service (`task: dokploy:<key>`, `ref` = the commit sha) as the wake-up record.
 
 Dokploy polls GitHub (outbound only), reads the artifact, checks it against the run, and deploys the digest.
+When GitHub blocks artifact uploads (the Actions storage quota is used up), the same manifest is also printed as one log line,
+`dokploy-release/v1 <payload>` (the compact manifest JSON, one letter g-v per nibble: the runner masks secrets and their base64 forms in logs, and a short secret such as a port would match hex digits),
+and Dokploy reads it from the log of the release job instead. The Deployment is still created, the upload step only warns, and every
+check Dokploy makes is the same for either source. Do not keep image digests, registry hosts, repository names or service keys in
+secrets, and avoid very short secrets: a masked value (`***`) in that line makes Dokploy refuse the release. A 64 KiB manifest is a ~128 KiB log line.
+The Deployment payload also carries `job` (GITHUB_JOB) and `runner` (RUNNER_NAME) as hints for which job log to read.
 The Deployment is only a signal. The artifact is the record Dokploy trusts, because only the run itself can upload its own artifacts.
 
 ## Use it (phase 1: your own job builds and pushes the image)

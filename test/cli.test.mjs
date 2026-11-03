@@ -47,6 +47,24 @@ test("manifest writes the file and the outputs", () =>
 		assert.match(out, /^published=true$/m);
 	}));
 
+test("manifest also prints the manifest as one letters-only marker line for Dokploy to read from the job log", () =>
+	withDir((dir) => {
+		const result = spawnSync("node", [cli, "manifest"], { env: baseEnv(dir), encoding: "utf8" });
+		assert.equal(result.status, 0, result.stdout + result.stderr);
+		const lines = result.stdout.split(/\r?\n/).filter((line) => line.startsWith("dokploy-release/v1 "));
+		assert.equal(lines.length, 1);
+		const encoded = lines[0].slice("dokploy-release/v1 ".length);
+		assert.match(encoded, /^[g-v]+$/);
+		const bytes = Buffer.alloc(encoded.length / 2);
+		for (let i = 0; i < bytes.length; i += 1) {
+			bytes[i] = ((encoded.charCodeAt(2 * i) - 103) << 4) | (encoded.charCodeAt(2 * i + 1) - 103);
+		}
+		const fromLog = JSON.parse(bytes.toString("utf8"));
+		const fromFile = JSON.parse(readFileSync(join(dir, "dokploy-release", "dokploy-release.json"), "utf8"));
+		assert.deepEqual(fromLog, fromFile);
+		assert.ok(!result.stdout.includes("::dokploy-release::"));
+	}));
+
 test("a bad input fails the step when the release is pulled", () =>
 	withDir((dir) => {
 		const result = spawnSync("node", [cli, "manifest"], {

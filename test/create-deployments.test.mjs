@@ -29,6 +29,14 @@ test("the Deployment is a wake-up record: the commit, a dokploy task, no waiting
 	});
 });
 
+test("the payload carries the job and runner as hints, only when the environment has them", () => {
+	const hinted = deploymentBody(manifest, "web", { GITHUB_JOB: "release", RUNNER_NAME: "GitHub Actions 7" });
+	assert.equal(hinted.payload.job, "release");
+	assert.equal(hinted.payload.runner, "GitHub Actions 7");
+	assert.deepEqual(Object.keys(deploymentBody(manifest, "web", {}).payload), ["schema", "run_id", "run_attempt", "artifact"]);
+	assert.equal(deploymentBody(manifest, "web", { GITHUB_JOB: "a\nb" }).payload.job, undefined);
+});
+
 test("the Deployment ref is a 40-character commit sha and the payload stays under 2 KiB", () => {
 	const body = deploymentBody(manifest, "web");
 	assert.match(body.ref, /^[0-9a-f]{40}$/);

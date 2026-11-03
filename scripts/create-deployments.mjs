@@ -21,7 +21,11 @@ const retryAfterMs = (response) => {
 
 export const WAKE_SCHEMA = "dokploy.deployment/v1";
 
-export const deploymentBody = (manifest, key) => ({
+// Hints for Dokploy about which job of the run printed the manifest line (GITHUB_JOB, RUNNER_NAME). They only
+// narrow which job log Dokploy reads; nothing is trusted from them.
+const hint = (value) => (typeof value === "string" && /^[ -~]{1,120}$/.test(value) ? value : undefined);
+
+export const deploymentBody = (manifest, key, env = {}) => ({
 	ref: manifest.sha,
 	task: `dokploy:${key}`,
 	environment: manifest.environment,
@@ -34,6 +38,8 @@ export const deploymentBody = (manifest, key) => ({
 		run_id: Number(manifest.source.runId),
 		run_attempt: manifest.source.runAttempt,
 		artifact: "dokploy-release",
+		...(hint(env.GITHUB_JOB) ? { job: hint(env.GITHUB_JOB) } : {}),
+		...(hint(env.RUNNER_NAME) ? { runner: hint(env.RUNNER_NAME) } : {}),
 	},
 });
 
@@ -51,7 +57,7 @@ export const createDeployments = async (deps, manifest) => {
 	const wait = deps.sleep ?? sleep;
 	const created = [];
 	for (const key of manifest.release.services) {
-		const body = JSON.stringify(deploymentBody(manifest, key));
+		const body = JSON.stringify(deploymentBody(manifest, key, deps.env ?? {}));
 		let lastError = "no attempt was made";
 		let id = null;
 		let waitMs = null;

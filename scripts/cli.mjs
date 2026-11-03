@@ -9,6 +9,21 @@ import { join } from "node:path";
 import { buildManifest, InputError } from "./build-manifest.mjs";
 import { createDeployments, DeploymentError } from "./create-deployments.mjs";
 
+// The line Dokploy looks for in the job log: `dokploy-release/v1 <payload>`. The payload is the UTF-8 bytes of the
+// compact manifest JSON, one letter per nibble (0 is "g", 15 is "v", high nibble first), so it only contains the
+// letters g to v. Not base64, because the runner masks secret values and their base64 forms in logs (an organization
+// has seen image digests masked that way); not hex, because a short secret made of 0-9a-f (a port, a PIN) would occur
+// by chance in hex text and get masked. No leading "::", so the runner's workflow command parser is never involved.
+// A 64 KiB manifest is a ~128 KiB line. Keep in step with Dokploy's log-manifest.ts (encodeMarkerPayload).
+const LOG_MARKER = "dokploy-release/v1 ";
+const encodePayload = (text) => {
+	let out = "";
+	for (const byte of Buffer.from(text, "utf8")) {
+		out += String.fromCharCode(103 + (byte >> 4), 103 + (byte & 15));
+	}
+	return out;
+};
+
 const command = process.argv[2];
 const dir = join(process.env.RUNNER_TEMP ?? ".", "dokploy-release");
 const file = join(dir, "dokploy-release.json");
@@ -37,6 +52,9 @@ if (command === "manifest") {
 		output("release-id", manifest.release.id);
 		output("published", "true");
 		console.log(`Release ${manifest.release.id}: ${manifest.release.services.join(", ")} (${manifest.delivery})`);
+		// A second copy of the manifest for Dokploy, on one line of its own: when GitHub blocks the artifact
+		// upload (Actions storage quota) Dokploy reads this line from the job log instead. Same manifest, same checks.
+		console.log(`${LOG_MARKER}${encodePayload(JSON.stringify(manifest))}`);
 	} catch (error) {
 		fail(error instanceof InputError ? error.message : `Unexpected error: ${error}`);
 	}
@@ -49,6 +67,7 @@ if (command === "manifest") {
 				token: process.env.GITHUB_TOKEN ?? "",
 				repository: process.env.GITHUB_REPOSITORY ?? "",
 				apiUrl: process.env.GITHUB_API_URL,
+				env: process.env,
 			},
 			manifest,
 		);
