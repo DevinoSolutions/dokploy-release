@@ -1,12 +1,13 @@
 // Entry points of action.yml.
 //   node cli.mjs manifest   writes $RUNNER_TEMP/dokploy-release/dokploy-release.json and the step outputs
 //   node cli.mjs deploy     reads that file and creates the GitHub Deployments
-// A failure fails the step, except with delivery "push": there the workflow
-// already deploys by itself, so publishing is best effort and only warns.
+// A bad input or configuration fails the step in both delivery modes. Only a
+// network or API failure of the GitHub Deployment call is best effort with
+// delivery "push" (the workflow already deploys by itself): it warns and exits 0.
 import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { buildManifest, InputError } from "./build-manifest.mjs";
-import { createDeployments } from "./create-deployments.mjs";
+import { createDeployments, DeploymentError } from "./create-deployments.mjs";
 
 const command = process.argv[2];
 const dir = join(process.env.RUNNER_TEMP ?? ".", "dokploy-release");
@@ -18,14 +19,10 @@ const output = (name, value) => {
 	}
 };
 
-const fail = (message, delivery) => {
-	const line = String(message).replace(/[\r\n]+/g, " ");
-	if (delivery === "push") {
-		console.log(`::warning title=dokploy-release::${line} The workflow's own deploy is not affected.`);
-		output("published", "false");
-		process.exit(0);
-	}
-	console.log(`::error title=dokploy-release::${line}`);
+const oneLine = (message) => String(message).replace(/[\r\n]+/g, " ");
+
+const fail = (message) => {
+	console.log(`::error title=dokploy-release::${oneLine(message)}`);
 	process.exit(1);
 };
 
@@ -41,7 +38,7 @@ if (command === "manifest") {
 		output("published", "true");
 		console.log(`Release ${manifest.release.id}: ${manifest.release.services.join(", ")} (${manifest.delivery})`);
 	} catch (error) {
-		fail(error instanceof InputError ? error.message : `Unexpected error: ${error}`, delivery);
+		fail(error instanceof InputError ? error.message : `Unexpected error: ${error}`);
 	}
 } else if (command === "deploy") {
 	try {
@@ -57,7 +54,13 @@ if (command === "manifest") {
 		);
 		for (const { key, id } of created) console.log(`GitHub Deployment ${id} for ${key}`);
 	} catch (error) {
-		fail(error instanceof Error ? error.message : String(error), delivery);
+		if (error instanceof DeploymentError && delivery === "push") {
+			console.log(
+				`::warning title=dokploy-release::${oneLine(error.message)} The workflow's own deploy is not affected.`,
+			);
+			process.exit(0);
+		}
+		fail(error instanceof Error ? error.message : String(error));
 	}
 } else {
 	console.log("::error title=dokploy-release::usage: cli.mjs manifest|deploy");

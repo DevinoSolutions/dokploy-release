@@ -34,33 +34,49 @@ jobs:
       - name: Unit tests
         run: node --test "test/*.test.mjs"
 
+
   release:
-    # The real thing, against this repository: artifact and Deployment.
+    # The real thing, against this repository: artifact and Deployment. Only from main,
+    # so a manual run on another branch cannot create the selftest environment.
     needs: unit
-    if: github.event_name != 'pull_request'
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     environment: selftest
     permissions:
       contents: read
       deployments: write
+      actions: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - id: release
+      - id: first
         uses: ./
         with:
           service: selftest
           environment: selftest
-          delivery: push
+          delivery: pull
           existing-image: ghcr.io/devinosolutions/dokploy-release/selftest@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
-      - name: The Deployment and its payload exist
+      # A second call in the same run replaces the artifact (overwrite: true) instead of failing on its name.
+      - id: second
+        uses: ./
+        with:
+          service: selftest
+          environment: selftest
+          delivery: pull
+          existing-image: ghcr.io/devinosolutions/dokploy-release/selftest@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+      - name: One artifact and the Deployment exist
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_ID: ${{ steps.release.outputs.release-id }}
+          FIRST: ${{ steps.first.outputs.release-id }}
+          SECOND: ${{ steps.second.outputs.release-id }}
         run: |
           set -euo pipefail
-          test -n "$RELEASE_ID"
-          gh api "repos/${GITHUB_REPOSITORY}/deployments?task=dokploy:selftest&sha=${GITHUB_SHA}&per_page=5" \
-            --jq '.[0] | select(.payload.schema == "dokploy.deployment/v1" and .payload.run_id == ('"${GITHUB_RUN_ID}"') and .task == "dokploy:selftest")' \
-            | tee /dev/stderr | grep -q payload
+          test -n "$FIRST"
+          test "$FIRST" = "$SECOND"
+          artifacts=$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/artifacts" --jq '[.artifacts[] | select(.name == "dokploy-release" and .expired == false)] | length')
+          echo "dokploy-release artifacts in this run: $artifacts"
+          test "$artifacts" = "1"
+          deployments=$(gh api "repos/${GITHUB_REPOSITORY}/deployments?task=dokploy:selftest&sha=${GITHUB_SHA}&per_page=10" --jq '[.[] | select(.task == "dokploy:selftest" and .payload.schema == "dokploy.deployment/v1" and .payload.run_id == ('"${GITHUB_RUN_ID}"'))] | length')
+          echo "Deployments for this run: $deployments"
+          test "$deployments" -ge 1

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { createDeployments, deploymentBody, WAKE_SCHEMA } from "../scripts/create-deployments.mjs";
+import { createDeployments, DeploymentError, deploymentBody, WAKE_SCHEMA } from "../scripts/create-deployments.mjs";
 
 const manifest = {
 	sha: "3f9c2a1e5b7d9c0a1b2c3d4e5f60718293a4b5c6",
@@ -9,8 +9,9 @@ const manifest = {
 	source: { runId: "9876543210", runAttempt: 2 },
 };
 
-const reply = (status, json = {}) => ({
+const reply = (status, json = {}, headers = {}) => ({
 	status,
+	headers: { get: (name) => headers[name.toLowerCase()] ?? null },
 	json: async () => json,
 	text: async () => JSON.stringify(json),
 });
@@ -104,4 +105,54 @@ test("a repository that is not owner/name is refused before any request", async 
 		createDeployments({ repository: "../x", token: "t", fetch: async () => assert.fail("no request") }, manifest),
 		/owner\/name/,
 	);
+});
+
+const one = { ...manifest, release: { ...manifest.release, services: ["web"] } };
+
+test("a 429 waits as long as Retry-After says, and a 403 with Retry-After is retried too", async () => {
+	const waits = [];
+	let n = 0;
+	const created = await createDeployments(
+		{
+			repository: "a/b",
+			token: "t",
+			sleep: async (ms) => waits.push(ms),
+			fetch: async () => {
+				n += 1;
+				if (n === 1) return reply(429, {}, { "retry-after": "7" });
+				if (n === 2) return reply(403, { message: "secondary rate limit" }, { "retry-after": "2" });
+				return reply(201, { id: 9 });
+			},
+		},
+		one,
+	);
+	assert.deepEqual(waits, [7000, 2000]);
+	assert.deepEqual(created, [{ key: "web", id: 9 }]);
+});
+
+test("a Retry-After far in the future is capped", async () => {
+	const waits = [];
+	let n = 0;
+	await createDeployments(
+		{
+			repository: "a/b",
+			token: "t",
+			sleep: async (ms) => waits.push(ms),
+			fetch: async () => (++n < 2 ? reply(429, {}, { "retry-after": "3600" }) : reply(201, { id: 1 })),
+		},
+		one,
+	);
+	assert.deepEqual(waits, [60000]);
+});
+
+test("a plain 403 (no Retry-After) is not retried", async () => {
+	let n = 0;
+	await assert.rejects(
+		createDeployments(
+			{ repository: "a/b", token: "t", sleep: async () => {}, fetch: async () => (n++, reply(403, { message: "forbidden" })) },
+			one,
+		),
+		(error) => error instanceof DeploymentError && /HTTP 403/.test(error.message),
+	);
+	assert.equal(n, 1);
 });

@@ -50,13 +50,13 @@
               "properties": {
                 "name": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$" },
                 "composeService": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$" },
-                "ref": { "type": "string", "pattern": "@sha256:[0-9a-f]{64}$" }
+                "ref": { "type": "string", "pattern": "^(?:[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?(?::[0-9]{1,5})?/)?[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*(?:/[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*)*@sha256:[0-9a-f]{64}$" }
               }
             }
           },
           "compose": {
             "type": ["object", "null"],
-            "properties": { "path": { "type": "string", "pattern": "^[A-Za-z0-9._][A-Za-z0-9._/-]{0,254}$" } }
+            "properties": { "path": { "type": "string", "pattern": "^(?!(?:.*/)?\\.\\.(?:/|$))[A-Za-z0-9._][A-Za-z0-9._/-]{0,254}$" } }
           },
           "migrations": {
             "description": "Reserved. Dokploy phase 1 refuses any manifest where this is not null.",

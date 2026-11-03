@@ -18,6 +18,7 @@ const baseEnv = (dir, extra = {}) => ({
 	GITHUB_REF: "refs/heads/dev",
 	GITHUB_RUN_ID: "123",
 	GITHUB_RUN_ATTEMPT: "1",
+	GITHUB_EVENT_NAME: "push",
 	INPUT_ENVIRONMENT: "development",
 	INPUT_SERVICE: "web",
 	INPUT_EXISTING_IMAGE: `registry.devino.ca/voicelabs/web@${D("e")}`,
@@ -56,24 +57,56 @@ test("a bad input fails the step when the release is pulled", () =>
 		assert.match(result.stdout, /::error title=dokploy-release::/);
 	}));
 
-test("the same bad input only warns while the workflow still deploys by push", () =>
+test("a bad input fails the step in push mode too", () =>
 	withDir((dir) => {
-		const result = spawnSync("node", [cli, "manifest"], {
-			env: baseEnv(dir, { INPUT_EXISTING_IMAGE: "ghcr.io/a/b/web:latest", INPUT_DELIVERY: "push" }),
-			encoding: "utf8",
-		});
-		assert.equal(result.status, 0);
-		assert.match(result.stdout, /::warning title=dokploy-release::/);
-		assert.match(readFileSync(join(dir, "out.txt"), "utf8"), /^published=false$/m);
+		const bad = [
+			{ INPUT_EXISTING_IMAGE: "ghcr.io/a/b/web:latest" },
+			{ INPUT_SERVICE: "Web" },
+			{ INPUT_COMPOSE: "../x.yml" },
+			{ GITHUB_EVENT_NAME: "pull_request" },
+			{ INPUT_MODE: "build" },
+		];
+		for (const extra of bad) {
+			const result = spawnSync("node", [cli, "manifest"], {
+				env: baseEnv(dir, { INPUT_DELIVERY: "push", ...extra }),
+				encoding: "utf8",
+			});
+			assert.equal(result.status, 1, JSON.stringify(extra) + result.stdout);
+			assert.match(result.stdout, /::error title=dokploy-release::/);
+		}
 	}));
 
-test("deploy without a manifest file fails a pulled release and warns a pushed one", () =>
+test("deploy without a manifest file fails in both delivery modes", () =>
 	withDir((dir) => {
-		const pulled = spawnSync("node", [cli, "deploy"], { env: baseEnv(dir), encoding: "utf8" });
-		assert.equal(pulled.status, 1);
-		const pushed = spawnSync("node", [cli, "deploy"], {
-			env: baseEnv(dir, { INPUT_DELIVERY: "push" }),
-			encoding: "utf8",
-		});
-		assert.equal(pushed.status, 0);
+		for (const delivery of ["pull", "push"]) {
+			const result = spawnSync("node", [cli, "deploy"], {
+				env: baseEnv(dir, { INPUT_DELIVERY: delivery }),
+				encoding: "utf8",
+			});
+			assert.equal(result.status, 1, delivery);
+		}
+	}));
+
+test("an API failure of the Deployment call fails a pulled release and only warns a pushed one", () =>
+	withDir((dir) => {
+		const made = spawnSync("node", [cli, "manifest"], { env: baseEnv(dir), encoding: "utf8" });
+		assert.equal(made.status, 0, made.stdout + made.stderr);
+		// An unreachable API address: a connection error on every attempt, no real request leaves the machine.
+		const unreachable = (delivery) =>
+			spawnSync("node", [cli, "deploy"], {
+				env: baseEnv(dir, {
+					INPUT_DELIVERY: delivery,
+					GITHUB_TOKEN: "t",
+					GITHUB_REPOSITORY: "a/b",
+					GITHUB_API_URL: "http://127.0.0.1:1",
+				}),
+				encoding: "utf8",
+				timeout: 30000,
+			});
+		const pulled = unreachable("pull");
+		assert.equal(pulled.status, 1, pulled.stdout);
+		assert.match(pulled.stdout, /::error title=dokploy-release::Could not create the GitHub Deployment/);
+		const pushed = unreachable("push");
+		assert.equal(pushed.status, 0, pushed.stdout);
+		assert.match(pushed.stdout, /::warning title=dokploy-release::Could not create the GitHub Deployment/);
 	}));

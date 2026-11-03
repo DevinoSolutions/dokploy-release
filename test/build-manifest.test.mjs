@@ -14,6 +14,7 @@ const run = {
 	GITHUB_REF: "refs/heads/main",
 	GITHUB_RUN_ID: "9876543210",
 	GITHUB_RUN_ATTEMPT: "1",
+	GITHUB_EVENT_NAME: "push",
 };
 const env = (extra) => ({ INPUT_ENVIRONMENT: "production", INPUT_DELIVERY: "pull", ...run, ...extra });
 const refuses = (extra, pattern) =>
@@ -94,10 +95,57 @@ test("odd inputs are refused", () => {
 	refuses({ INPUT_SERVICE: "web", INPUT_COMPOSE: "../x.yml", INPUT_EXISTING_IMAGE: `ghcr.io/a/b/web@${D("e")}` }, /relative path/);
 });
 
-test("build inputs are refused until a later version builds", () => {
-	for (const name of ["IMAGE", "DOCKERFILE", "CONTEXT", "BUILDER", "REGISTRY"]) {
-		refuses({ INPUT_SERVICE: "web", [`INPUT_${name}`]: "x", INPUT_EXISTING_IMAGE: `ghcr.io/a/b/web@${D("e")}` }, /later version/);
+test("inputs reserved for later versions are refused, so a typo cannot become a release", () => {
+	const reserved = [
+		"IMAGE",
+		"DOCKERFILE",
+		"CONTEXT",
+		"BUILDER",
+		"REGISTRY",
+		"MODE",
+		"MIGRATIONS",
+		"CACHE",
+		"ENVIRONMENTS",
+		"SECRETS",
+		"BUILD_ARGS",
+		"TARGET",
+	];
+	for (const name of reserved) {
+		refuses(
+			{ INPUT_SERVICE: "web", [`INPUT_${name}`]: "x", INPUT_EXISTING_IMAGE: `ghcr.io/a/b/web@${D("e")}` },
+			new RegExp(`${name.toLowerCase().replaceAll("_", "-")} is not supported in v1`),
+		);
 	}
+	// An empty value is what an unset input looks like.
+	assert.doesNotThrow(() =>
+		buildManifest(env({ INPUT_SERVICE: "web", INPUT_MODE: "  ", INPUT_EXISTING_IMAGE: `ghcr.io/a/b/web@${D("e")}` })),
+	);
+});
+
+test("only a push or a manual run can release", () => {
+	for (const event of ["push", "workflow_dispatch"]) {
+		assert.doesNotThrow(() =>
+			buildManifest(env({ GITHUB_EVENT_NAME: event, INPUT_SERVICE: "web", INPUT_EXISTING_IMAGE: `ghcr.io/a/b/web@${D("e")}` })),
+		);
+	}
+	for (const event of ["pull_request", "pull_request_target", "workflow_run", "schedule", "release", undefined]) {
+		refuses(
+			{ GITHUB_EVENT_NAME: event, INPUT_SERVICE: "web", INPUT_EXISTING_IMAGE: `ghcr.io/a/b/web@${D("e")}` },
+			/push or a manual run/,
+		);
+	}
+});
+
+test("only a .. path segment leaves the repository, two dots in a file name are fine", () => {
+	const image = `ghcr.io/a/b/web@${D("e")}`;
+	refuses({ INPUT_SERVICE: "web", INPUT_COMPOSE: "a/../x.yml", INPUT_EXISTING_IMAGE: image }, /relative path/);
+	refuses({ INPUT_SERVICE: "web", INPUT_COMPOSE: "a/..", INPUT_EXISTING_IMAGE: image }, /relative path/);
+	const manifest = buildManifest(env({ INPUT_SERVICE: "web", INPUT_COMPOSE: "docker..compose.yml", INPUT_EXISTING_IMAGE: image }));
+	assert.equal(manifest.services[0].compose.path, "docker..compose.yml");
+});
+
+test("an uppercase image name is refused with a lowercase hint", () => {
+	refuses({ INPUT_SERVICE: "web", INPUT_EXISTING_IMAGE: `ghcr.io/Acme/shop/web@${D("e")}` }, /must be lowercase/);
 });
 
 test("a run that is not on a branch cannot release", () => {

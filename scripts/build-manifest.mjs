@@ -17,6 +17,22 @@ const REF = new RegExp(
 
 export class InputError extends Error {}
 
+// Declared in action.yml so a typo cannot pass silently: any non-empty value is refused.
+export const UNSUPPORTED_INPUTS = [
+	"IMAGE",
+	"DOCKERFILE",
+	"CONTEXT",
+	"BUILDER",
+	"REGISTRY",
+	"MODE",
+	"MIGRATIONS",
+	"CACHE",
+	"ENVIRONMENTS",
+	"SECRETS",
+	"BUILD_ARGS",
+	"TARGET",
+];
+
 const lines = (value) =>
 	String(value ?? "")
 		.split(/\r?\n/)
@@ -28,10 +44,17 @@ const lines = (value) =>
  * @returns {object} the manifest
  */
 export const buildManifest = (env) => {
-	for (const unsupported of ["IMAGE", "DOCKERFILE", "CONTEXT", "BUILDER", "REGISTRY"]) {
+	const event = String(env.GITHUB_EVENT_NAME ?? "");
+	if (event !== "push" && event !== "workflow_dispatch") {
+		throw new InputError(
+			`A release is published from a push or a manual run (workflow_dispatch); this run was triggered by ${JSON.stringify(event || "no event")}.`,
+		);
+	}
+
+	for (const unsupported of UNSUPPORTED_INPUTS) {
 		if (String(env[`INPUT_${unsupported}`] ?? "").trim() !== "") {
 			throw new InputError(
-				`The input ${unsupported.toLowerCase()} builds an image, which arrives with a later version of this action. Build and push in your own job and pass its output as existing-image.`,
+				`The input ${unsupported.toLowerCase().replaceAll("_", "-")} is not supported in v1 of this action; it is reserved for a later version. Build and push in your own job and pass its output as existing-image.`,
 			);
 		}
 	}
@@ -60,7 +83,7 @@ export const buildManifest = (env) => {
 		throw new InputError("environment is required (the GitHub Environment name).");
 	}
 	const compose = String(env.INPUT_COMPOSE ?? "").trim();
-	if (compose !== "" && (!COMPOSE_PATH.test(compose) || compose.includes(".."))) {
+	if (compose !== "" && (!COMPOSE_PATH.test(compose) || compose.split("/").includes(".."))) {
 		throw new InputError("compose must be a relative path inside the repository.");
 	}
 
@@ -72,6 +95,11 @@ export const buildManifest = (env) => {
 		if (eq > 0 && !line.slice(0, eq).includes("@")) {
 			target = line.slice(0, eq).trim();
 			ref = line.slice(eq + 1).trim();
+		}
+		if (!REF.test(ref) && REF.test(ref.toLowerCase())) {
+			throw new InputError(
+				`existing-image must be lowercase: ${JSON.stringify(ref.slice(0, 120))} has uppercase letters, which a registry name and a sha256 digest cannot have.`,
+			);
 		}
 		if (!REF.test(ref)) {
 			throw new InputError(

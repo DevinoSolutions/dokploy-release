@@ -31,12 +31,20 @@ Add one job after the job that pushes your image. Take the image from an output 
           existing-image: ${{ needs.build.outputs.image }}   # ghcr.io/acme/shop@sha256:...
 ```
 
-Rules the action enforces: the image must be `<repository>@sha256:<digest>` (a tag is refused), no build inputs are accepted yet
-(`image`, `dockerfile`, `context`, `builder`, `registry` arrive later), and several services are written `key=image` or
-`key/composeService=image`, one per line.
+Rules the action enforces:
+
+- The image must be `<repository>@sha256:<digest>`, in lowercase. A tag is refused.
+- Several services are written `key=image` or `key/composeService=image`, one per line.
+- The run must come from a branch and from a `push` or a manual `workflow_dispatch`. Other events (`pull_request`, `pull_request_target`, `workflow_run`, `schedule`) are refused.
+- The inputs `image`, `dockerfile`, `context`, `builder`, `registry`, `mode`, `migrations`, `cache`, `environments`, `secrets`, `build-args` and `target` are reserved for later versions.
+  They are declared so that a typo cannot pass silently: any non-empty value fails the step with "not supported in v1".
 
 `delivery: push` publishes the same manifest but tells Dokploy not to deploy it: your own workflow still deploys, and
-Dokploy only verifies the release and advances its record of the deployed commit. In that mode a failure to publish only warns.
+Dokploy only verifies the release and advances its record of the deployed commit.
+A bad input or configuration fails the step in both delivery modes. Only a network or API failure while creating the
+GitHub Deployment is a warning in `push` mode, so a GitHub outage never blocks a deploy your own workflow performs.
+
+The action sets up Node 22 itself (self-hosted images often have no node on `PATH`).
 
 ## Files
 
