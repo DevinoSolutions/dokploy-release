@@ -1,0 +1,66 @@
+name: selftest
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: selftest-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+      - name: Fixtures are what the generator writes
+        run: |
+          node scripts/make-fixtures.mjs
+          git diff --exit-code -- fixtures
+      - name: Fixtures follow the schema
+        run: |
+          npm install --no-save --no-audit --no-fund ajv@8.17.1
+          node scripts/validate-fixtures.mjs
+      - name: Unit tests
+        run: node --test "test/*.test.mjs"
+
+  release:
+    # The real thing, against this repository: artifact and Deployment.
+    needs: unit
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    environment: selftest
+    permissions:
+      contents: read
+      deployments: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - id: release
+        uses: ./
+        with:
+          service: selftest
+          environment: selftest
+          delivery: push
+          existing-image: ghcr.io/devinosolutions/dokploy-release/selftest@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+      - name: The Deployment and its payload exist
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_ID: ${{ steps.release.outputs.release-id }}
+        run: |
+          set -euo pipefail
+          test -n "$RELEASE_ID"
+          gh api "repos/${GITHUB_REPOSITORY}/deployments?task=dokploy:selftest&sha=${GITHUB_SHA}&per_page=5" \
+            --jq '.[0] | select(.payload.schema == "dokploy.deployment/v1" and .payload.run_id == ('"${GITHUB_RUN_ID}"') and .task == "dokploy:selftest")' \
+            | tee /dev/stderr | grep -q payload

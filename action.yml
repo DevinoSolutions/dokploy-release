@@ -1,0 +1,99 @@
+name: Dokploy release
+description: >-
+  Publishes a release for Dokploy: a manifest uploaded as the run artifact
+  dokploy-release, and one GitHub Deployment per service as the wake-up record.
+  Needs no Dokploy address and no Dokploy API key.
+author: DevinoSolutions
+branding:
+  icon: upload-cloud
+  color: blue
+
+inputs:
+  service:
+    description: Service key (the Deployment task is dokploy:<key>). Use services for several.
+    required: false
+  services:
+    description: Service keys, one per line.
+    required: false
+  existing-image:
+    description: >-
+      Images your own job built and pushed, taken from an output of a job in the
+      same run. One line per image, <repository>@sha256:<digest>. With several
+      services write <key>=<image> or <key>/<compose service>=<image>. A tag is refused.
+    required: true
+  environment:
+    description: GitHub Environment of the release (its deployment branch policy must allow only the tracked branch).
+    required: true
+  delivery:
+    description: "pull: Dokploy deploys from this release. push: your workflow still deploys; Dokploy only verifies the release."
+    required: false
+    default: pull
+  compose:
+    description: Path of the compose file in the repository, when the service is a compose stack.
+    required: false
+  github-token:
+    description: Token used to create the Deployments. Needs deployments write.
+    required: false
+    default: ${{ github.token }}
+  image:
+    description: Not available yet (arrives with a later version).
+    required: false
+  dockerfile:
+    description: Not available yet (arrives with a later version).
+    required: false
+  context:
+    description: Not available yet (arrives with a later version).
+    required: false
+  builder:
+    description: Not available yet (arrives with a later version).
+    required: false
+  registry:
+    description: Not available yet (arrives with a later version).
+    required: false
+
+outputs:
+  release-id:
+    description: The release id, gh-<run id>.<attempt>.
+    value: ${{ steps.manifest.outputs.release-id }}
+
+runs:
+  using: composite
+  steps:
+    - name: Build the release manifest
+      id: manifest
+      shell: bash
+      env:
+        INPUT_SERVICE: ${{ inputs.service }}
+        INPUT_SERVICES: ${{ inputs.services }}
+        INPUT_EXISTING_IMAGE: ${{ inputs.existing-image }}
+        INPUT_ENVIRONMENT: ${{ inputs.environment }}
+        INPUT_DELIVERY: ${{ inputs.delivery }}
+        INPUT_COMPOSE: ${{ inputs.compose }}
+        INPUT_IMAGE: ${{ inputs.image }}
+        INPUT_DOCKERFILE: ${{ inputs.dockerfile }}
+        INPUT_CONTEXT: ${{ inputs.context }}
+        INPUT_BUILDER: ${{ inputs.builder }}
+        INPUT_REGISTRY: ${{ inputs.registry }}
+      run: |
+        command -v node >/dev/null || { echo "::error title=dokploy-release::node is not installed on this runner"; exit 1; }
+        node "${{ github.action_path }}/scripts/cli.mjs" manifest
+
+    - name: Upload the release manifest
+      if: steps.manifest.outputs.published == 'true'
+      continue-on-error: ${{ inputs.delivery == 'push' }}
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+      with:
+        name: dokploy-release
+        path: ${{ steps.manifest.outputs.path }}
+        retention-days: 7
+        if-no-files-found: error
+        # A re-run attempt replaces the artifact; Dokploy treats an older attempt as superseded.
+        overwrite: true
+
+    - name: Create the GitHub Deployments
+      if: steps.manifest.outputs.published == 'true'
+      shell: bash
+      env:
+        INPUT_DELIVERY: ${{ inputs.delivery }}
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+      run: node "${{ github.action_path }}/scripts/cli.mjs" deploy
