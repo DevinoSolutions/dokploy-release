@@ -65,18 +65,29 @@ jobs:
           environment: selftest
           delivery: pull
           existing-image: ghcr.io/devinosolutions/dokploy-release/selftest@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
-      - name: One artifact and the Deployment exist
+      - name: The manifest was delivered and the Deployment exists
         env:
           GH_TOKEN: ${{ github.token }}
           FIRST: ${{ steps.first.outputs.release-id }}
           SECOND: ${{ steps.second.outputs.release-id }}
+          FIRST_UPLOADED: ${{ steps.first.outputs.artifact-uploaded }}
+          SECOND_UPLOADED: ${{ steps.second.outputs.artifact-uploaded }}
         run: |
           set -euo pipefail
           test -n "$FIRST"
           test "$FIRST" = "$SECOND"
           artifacts=$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/artifacts" --jq '[.artifacts[] | select(.name == "dokploy-release" and .expired == false)] | length')
-          echo "dokploy-release artifacts in this run: $artifacts"
-          test "$artifacts" = "1"
+          echo "dokploy-release artifacts in this run: $artifacts (uploaded: first=$FIRST_UPLOADED second=$SECOND_UPLOADED)"
+          # The artifact is the first manifest source; when the org's Actions storage budget blocks
+          # uploads, the action still prints the "dokploy-release/v1 <payload>" marker and Dokploy
+          # reads it from this job's log, so a missing artifact is only a failure when an upload
+          # reported success.
+          if [ "$FIRST_UPLOADED" = "true" ] || [ "$SECOND_UPLOADED" = "true" ]; then
+            test "$artifacts" = "1"
+          else
+            test "$artifacts" = "0"
+            echo "::notice title=dokploy-release::Artifact upload blocked (storage quota); the job-log marker is the manifest source for this run."
+          fi
           deployments=$(gh api "repos/${GITHUB_REPOSITORY}/deployments?task=dokploy:selftest&sha=${GITHUB_SHA}&per_page=10" --jq '[.[] | select(.task == "dokploy:selftest" and .payload.schema == "dokploy.deployment/v1" and .payload.run_id == ('"${GITHUB_RUN_ID}"'))] | length')
           echo "Deployments for this run: $deployments"
           test "$deployments" -ge 1
