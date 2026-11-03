@@ -1,0 +1,72 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/DevinoSolutions/dokploy-release/schema/dokploy.release.v1.schema.json",
+  "title": "Dokploy release manifest",
+  "description": "The run artifact dokploy-release (dokploy-release.json). Unknown fields are ignored by readers; an unknown major version is refused. Rules a schema cannot express (release.services equals the service keys, sha equals the run head) are checked by Dokploy.",
+  "type": "object",
+  "required": ["schema", "sha", "delivery", "release", "source", "environment", "services"],
+  "properties": {
+    "schema": { "type": "string", "pattern": "^dokploy\\.release/v1(\\.[0-9]+)?$" },
+    "sha": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+    "delivery": { "enum": ["pull", "push"] },
+    "release": {
+      "type": "object",
+      "required": ["id", "services"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[A-Za-z0-9._-]{1,128}$" },
+        "services": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/key" }
+        }
+      }
+    },
+    "source": {
+      "type": "object",
+      "required": ["forge", "ref", "runId", "runAttempt"],
+      "properties": {
+        "forge": { "const": "github" },
+        "ref": { "type": "string", "pattern": "^refs/heads/.+" },
+        "runId": { "type": "string", "pattern": "^[0-9]{1,18}$" },
+        "runAttempt": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "environment": { "type": "string", "minLength": 1, "maxLength": 255 },
+    "services": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["key", "images"],
+        "properties": {
+          "key": { "$ref": "#/$defs/key" },
+          "images": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "required": ["name", "composeService", "ref"],
+              "properties": {
+                "name": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$" },
+                "composeService": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$" },
+                "ref": { "type": "string", "pattern": "^(?:[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?(?::[0-9]{1,5})?/)?[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*(?:/[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*)*@sha256:[0-9a-f]{64}$" }
+              }
+            }
+          },
+          "compose": {
+            "type": ["object", "null"],
+            "properties": { "path": { "type": "string", "pattern": "^(?!(?:.*/)?\\.\\.(?:/|$))[A-Za-z0-9._][A-Za-z0-9._/-]{0,254}$" } }
+          },
+          "migrations": {
+            "description": "Reserved. Dokploy phase 1 refuses any manifest where this is not null.",
+            "type": ["object", "null"]
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "key": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{0,62}$" }
+  }
+}

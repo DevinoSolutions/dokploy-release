@@ -1,0 +1,82 @@
+name: selftest
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: selftest-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+      - name: Fixtures are what the generator writes
+        run: |
+          node scripts/make-fixtures.mjs
+          git diff --exit-code -- fixtures
+      - name: Fixtures follow the schema
+        run: |
+          npm install --no-save --no-audit --no-fund ajv@8.17.1
+          node scripts/validate-fixtures.mjs
+      - name: Unit tests
+        run: node --test "test/*.test.mjs"
+
+
+  release:
+    # The real thing, against this repository: artifact and Deployment. Only from main,
+    # so a manual run on another branch cannot create the selftest environment.
+    needs: unit
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: selftest
+    permissions:
+      contents: read
+      deployments: write
+      actions: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - id: first
+        uses: ./
+        with:
+          service: selftest
+          environment: selftest
+          delivery: pull
+          existing-image: ghcr.io/devinosolutions/dokploy-release/selftest@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+      # A second call in the same run replaces the artifact (overwrite: true) instead of failing on its name.
+      - id: second
+        uses: ./
+        with:
+          service: selftest
+          environment: selftest
+          delivery: pull
+          existing-image: ghcr.io/devinosolutions/dokploy-release/selftest@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+      - name: One artifact and the Deployment exist
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FIRST: ${{ steps.first.outputs.release-id }}
+          SECOND: ${{ steps.second.outputs.release-id }}
+        run: |
+          set -euo pipefail
+          test -n "$FIRST"
+          test "$FIRST" = "$SECOND"
+          artifacts=$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/artifacts" --jq '[.artifacts[] | select(.name == "dokploy-release" and .expired == false)] | length')
+          echo "dokploy-release artifacts in this run: $artifacts"
+          test "$artifacts" = "1"
+          deployments=$(gh api "repos/${GITHUB_REPOSITORY}/deployments?task=dokploy:selftest&sha=${GITHUB_SHA}&per_page=10" --jq '[.[] | select(.task == "dokploy:selftest" and .payload.schema == "dokploy.deployment/v1" and .payload.run_id == ('"${GITHUB_RUN_ID}"'))] | length')
+          echo "Deployments for this run: $deployments"
+          test "$deployments" -ge 1
