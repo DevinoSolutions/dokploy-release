@@ -1,0 +1,19 @@
+{
+  "name": "dokploy-release",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Publishes a release manifest and GitHub Deployments for Dokploy.",
+  "type": "module",
+  "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "fixtures": "node scripts/make-fixtures.mjs",
+    "test": "node --test \"test/*.test.mjs\"",
+    "validate": "node scripts/validate-fixtures.mjs"
+  },
+  "devDependencies": {
+    "ajv": "8.17.1"
+  }
+}
