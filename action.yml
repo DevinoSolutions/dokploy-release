@@ -76,6 +76,9 @@ outputs:
   release-id:
     description: The release id, gh-<run id>.<attempt>.
     value: ${{ steps.manifest.outputs.release-id }}
+  artifact-uploaded:
+    description: "true when the dokploy-release artifact was uploaded; false when the upload failed (storage quota) and Dokploy reads the manifest from this job's log."
+    value: ${{ steps.upload.outcome == 'success' }}
 
 runs:
   using: composite
