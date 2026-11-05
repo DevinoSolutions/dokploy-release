@@ -1,0 +1,51 @@
+name: selftest-log-only
+
+# upload-artifact: false in a run of its own: no artifact is uploaded, the job log carries the only manifest.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: selftest-log-only-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  release:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: selftest
+    permissions:
+      contents: read
+      deployments: write
+      actions: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - id: release
+        uses: ./
+        with:
+          service: selftest-log-only
+          environment: selftest
+          delivery: pull
+          upload-artifact: 'false'
+          existing-image: ghcr.io/devinosolutions/dokploy-release/selftest@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+      - name: No artifact, and the Deployment exists
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE: ${{ steps.release.outputs.release-id }}
+          UPLOADED: ${{ steps.release.outputs.artifact-uploaded }}
+        run: |
+          set -euo pipefail
+          test -n "$RELEASE"
+          test "$UPLOADED" = "false"
+          artifacts=$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/artifacts" --jq '[.artifacts[] | select(.name == "dokploy-release")] | length')
+          echo "dokploy-release artifacts in this run: $artifacts"
+          test "$artifacts" = "0"
+          deployments=$(gh api "repos/${GITHUB_REPOSITORY}/deployments?task=dokploy:selftest-log-only&sha=${GITHUB_SHA}&per_page=10" --jq '[.[] | select(.task == "dokploy:selftest-log-only" and .payload.schema == "dokploy.deployment/v1" and .payload.run_id == ('"${GITHUB_RUN_ID}"'))] | length')
+          echo "Deployments for this run: $deployments"
+          test "$deployments" -ge 1

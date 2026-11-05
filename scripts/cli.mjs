@@ -45,6 +45,11 @@ const delivery = String(process.env.INPUT_DELIVERY ?? "pull").trim() || "pull";
 
 if (command === "manifest") {
 	try {
+		// upload-artifact only decides whether the action uploads the artifact; a typo must not pass silently.
+		const upload = String(process.env.INPUT_UPLOAD_ARTIFACT ?? "").trim().toLowerCase();
+		if (upload !== "" && upload !== "true" && upload !== "false") {
+			throw new InputError('The input upload-artifact must be "true" or "false"');
+		}
 		const manifest = buildManifest(process.env);
 		mkdirSync(dir, { recursive: true });
 		writeFileSync(file, `${JSON.stringify(manifest, null, 2)}\n`);

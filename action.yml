@@ -1,7 +1,7 @@
 name: Dokploy release
 description: >-
   Publishes a release for Dokploy: a manifest uploaded as the run artifact
-  dokploy-release, and one GitHub Deployment per service as the wake-up record.
+  dokploy-release (or, with upload-artifact false, only printed in the job log), and one GitHub Deployment per service as the wake-up record.
   Needs no Dokploy address and no Dokploy API key.
 author: DevinoSolutions
 branding:
@@ -107,6 +107,7 @@ runs:
         INPUT_ENVIRONMENT: ${{ inputs.environment }}
         INPUT_DELIVERY: ${{ inputs.delivery }}
         INPUT_COMPOSE: ${{ inputs.compose }}
+        INPUT_UPLOAD_ARTIFACT: ${{ inputs.upload-artifact }}
         INPUT_IMAGE: ${{ inputs.image }}
         INPUT_DOCKERFILE: ${{ inputs.dockerfile }}
         INPUT_CONTEXT: ${{ inputs.context }}
