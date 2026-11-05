@@ -39,6 +39,10 @@ Add one job after the job that pushes your image. Take the image from an output 
 
 Rules the action enforces:
 
+- `upload-artifact` (default `true`) controls the run artifact. With `false` the artifact upload step is skipped entirely and the
+  manifest exists only as the `dokploy-release/v1 <payload>` line in the release job's log, which Dokploy reads the same way
+  (same checks, same trust). Use it when a repository's policy forbids `actions/upload-artifact` or when it has no artifact storage.
+  The output `artifact-uploaded` is then `false`. Existing workflows keep uploading.
 - The image must be `<repository>@sha256:<digest>`, in lowercase. A tag is refused.
 - Several services are written `key=image` or `key/composeService=image`, one per line.
 - The run must come from a branch and from a `push` or a manual `workflow_dispatch`. Other events (`pull_request`, `pull_request_target`, `workflow_run`, `schedule`) are refused.

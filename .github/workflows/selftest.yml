@@ -65,6 +65,15 @@ jobs:
           environment: selftest
           delivery: pull
           existing-image: ghcr.io/devinosolutions/dokploy-release/selftest@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+      # upload-artifact: false skips the upload step and still prints the log marker and creates the Deployment.
+      - id: nolog
+        uses: ./
+        with:
+          service: selftest-log-only
+          environment: selftest
+          delivery: pull
+          upload-artifact: 'false'
+          existing-image: ghcr.io/devinosolutions/dokploy-release/selftest@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
       - name: The manifest was delivered and the Deployment exists
         env:
           GH_TOKEN: ${{ github.token }}
@@ -72,8 +81,13 @@ jobs:
           SECOND: ${{ steps.second.outputs.release-id }}
           FIRST_UPLOADED: ${{ steps.first.outputs.artifact-uploaded }}
           SECOND_UPLOADED: ${{ steps.second.outputs.artifact-uploaded }}
+          NOLOG_UPLOADED: ${{ steps.nolog.outputs.artifact-uploaded }}
+          NOLOG_RELEASE: ${{ steps.nolog.outputs.release-id }}
         run: |
           set -euo pipefail
+          # The log-only call never uploads and still publishes a release.
+          test "$NOLOG_UPLOADED" = "false"
+          test -n "$NOLOG_RELEASE"
           test -n "$FIRST"
           test "$FIRST" = "$SECOND"
           artifacts=$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/artifacts" --jq '[.artifacts[] | select(.name == "dokploy-release" and .expired == false)] | length')
@@ -91,3 +105,6 @@ jobs:
           deployments=$(gh api "repos/${GITHUB_REPOSITORY}/deployments?task=dokploy:selftest&sha=${GITHUB_SHA}&per_page=10" --jq '[.[] | select(.task == "dokploy:selftest" and .payload.schema == "dokploy.deployment/v1" and .payload.run_id == ('"${GITHUB_RUN_ID}"'))] | length')
           echo "Deployments for this run: $deployments"
           test "$deployments" -ge 1
+          logonly=$(gh api "repos/${GITHUB_REPOSITORY}/deployments?task=dokploy:selftest-log-only&sha=${GITHUB_SHA}&per_page=10" --jq '[.[] | select(.task == "dokploy:selftest-log-only" and .payload.run_id == ('"${GITHUB_RUN_ID}"'))] | length')
+          echo "Deployments of the log-only service: $logonly"
+          test "$logonly" -ge 1
