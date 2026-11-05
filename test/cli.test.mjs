@@ -128,3 +128,23 @@ test("an API failure of the Deployment call fails a pulled release and only warn
 		assert.equal(pushed.status, 0, pushed.stdout);
 		assert.match(pushed.stdout, /::warning title=dokploy-release::Could not create the GitHub Deployment/);
 	}));
+
+test("manifest refuses an upload-artifact value that is neither true nor false", () =>
+	withDir((dir) => {
+		const result = spawnSync("node", [cli, "manifest"], {
+			env: baseEnv(dir, { INPUT_UPLOAD_ARTIFACT: "flase" }),
+			encoding: "utf8",
+		});
+		assert.equal(result.status, 1);
+		assert.match(result.stdout, /upload-artifact must be "true" or "false"/);
+	}));
+
+test("manifest accepts upload-artifact false and still prints the log marker", () =>
+	withDir((dir) => {
+		const result = spawnSync("node", [cli, "manifest"], {
+			env: baseEnv(dir, { INPUT_UPLOAD_ARTIFACT: "false" }),
+			encoding: "utf8",
+		});
+		assert.equal(result.status, 0);
+		assert.match(result.stdout, /^dokploy-release\/v1 [g-v]+$/m);
+	}));

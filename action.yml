@@ -1,7 +1,7 @@
 name: Dokploy release
 description: >-
   Publishes a release for Dokploy: a manifest uploaded as the run artifact
-  dokploy-release, and one GitHub Deployment per service as the wake-up record.
+  dokploy-release (or, with upload-artifact false, only printed in the job log), and one GitHub Deployment per service as the wake-up record.
   Needs no Dokploy address and no Dokploy API key.
 author: DevinoSolutions
 branding:
@@ -31,6 +31,13 @@ inputs:
   compose:
     description: Path of the compose file in the repository, when the service is a compose stack.
     required: false
+  upload-artifact:
+    description: >-
+      true (default): upload the manifest as the run artifact dokploy-release and also print it in the job log.
+      false: skip the upload and publish the manifest only as the job-log line, which Dokploy reads the same way.
+      Use false when the repository forbids actions/upload-artifact or has no artifact storage.
+    required: false
+    default: 'true'
   github-token:
     description: Token used to create the Deployments. Needs deployments write.
     required: false
@@ -77,7 +84,7 @@ outputs:
     description: The release id, gh-<run id>.<attempt>.
     value: ${{ steps.manifest.outputs.release-id }}
   artifact-uploaded:
-    description: "true when the dokploy-release artifact was uploaded; false when the upload failed (storage quota) and Dokploy reads the manifest from this job's log."
+    description: "true when the dokploy-release artifact was uploaded; false when the upload was turned off (upload-artifact: false) or failed (storage quota), and Dokploy reads the manifest from this job's log."
     value: ${{ steps.upload.outcome == 'success' }}
 
 runs:
@@ -100,6 +107,7 @@ runs:
         INPUT_ENVIRONMENT: ${{ inputs.environment }}
         INPUT_DELIVERY: ${{ inputs.delivery }}
         INPUT_COMPOSE: ${{ inputs.compose }}
+        INPUT_UPLOAD_ARTIFACT: ${{ inputs.upload-artifact }}
         INPUT_IMAGE: ${{ inputs.image }}
         INPUT_DOCKERFILE: ${{ inputs.dockerfile }}
         INPUT_CONTEXT: ${{ inputs.context }}
@@ -117,7 +125,7 @@ runs:
 
     - name: Upload the release manifest
       id: upload
-      if: steps.manifest.outputs.published == 'true'
+      if: steps.manifest.outputs.published == 'true' && inputs.upload-artifact != 'false'
       # Never fatal: when GitHub blocks the upload (Actions storage quota) Dokploy reads the manifest
       # from this job's log (the "dokploy-release/v1 <payload>" line the manifest step printed).
       continue-on-error: true

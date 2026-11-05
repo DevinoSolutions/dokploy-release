@@ -3,7 +3,7 @@
 Publishes a release for [Dokploy](https://github.com/DevinoSolutions/dokploy-community) from a GitHub Actions run.
 The action holds no Dokploy address and no Dokploy API key. It does two things:
 
-1. Uploads the release manifest (`dokploy.release/v1`) as the run artifact `dokploy-release`.
+1. Uploads the release manifest (`dokploy.release/v1`) as the run artifact `dokploy-release` (or, with `upload-artifact: false`, only prints it in the job log).
 2. Creates one GitHub Deployment per service (`task: dokploy:<key>`, `ref` = the commit sha) as the wake-up record.
 
 Dokploy polls GitHub (outbound only), reads the artifact, checks it against the run, and deploys the digest.
@@ -39,6 +39,11 @@ Add one job after the job that pushes your image. Take the image from an output 
 
 Rules the action enforces:
 
+- `upload-artifact` (default `true`) controls the run artifact. With `false` the artifact upload step is skipped entirely and the
+  manifest exists only as the `dokploy-release/v1 <payload>` line in the release job's log, which Dokploy reads the same way
+  (same checks, same trust). Use it when a repository's policy forbids `actions/upload-artifact` or when it has no artifact storage.
+  The output `artifact-uploaded` is then `false`. Existing workflows keep uploading. Any value other than `true` or `false` fails the step.
+  A run publishes one manifest: a log-only release must not share its run with another `dokploy-release` call (two markers in one run are refused as ambiguous).
 - The image must be `<repository>@sha256:<digest>`, in lowercase. A tag is refused.
 - Several services are written `key=image` or `key/composeService=image`, one per line.
 - The run must come from a branch and from a `push` or a manual `workflow_dispatch`. Other events (`pull_request`, `pull_request_target`, `workflow_run`, `schedule`) are refused.
