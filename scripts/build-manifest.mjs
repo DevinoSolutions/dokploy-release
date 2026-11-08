@@ -54,7 +54,7 @@ export const buildManifest = (env) => {
 	for (const unsupported of UNSUPPORTED_INPUTS) {
 		if (String(env[`INPUT_${unsupported}`] ?? "").trim() !== "") {
 			throw new InputError(
-				`The input ${unsupported.toLowerCase().replaceAll("_", "-")} is not supported in v1 of this action; it is reserved for a later version. Build and push in your own job and pass its output as existing-image.`,
+				`The input ${unsupported.toLowerCase().replaceAll("_", "-")} is not supported in v2 of this action; it is reserved for a later version. Build and push in your own job and pass its output as existing-image.`,
 			);
 		}
 	}

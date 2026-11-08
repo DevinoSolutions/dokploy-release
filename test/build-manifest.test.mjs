@@ -113,7 +113,7 @@ test("inputs reserved for later versions are refused, so a typo cannot become a 
 	for (const name of reserved) {
 		refuses(
 			{ INPUT_SERVICE: "web", [`INPUT_${name}`]: "x", INPUT_EXISTING_IMAGE: `ghcr.io/a/b/web@${D("e")}` },
-			new RegExp(`${name.toLowerCase().replaceAll("_", "-")} is not supported in v1`),
+			new RegExp(`${name.toLowerCase().replaceAll("_", "-")} is not supported in v2`),
 		);
 	}
 	// An empty value is what an unset input looks like.

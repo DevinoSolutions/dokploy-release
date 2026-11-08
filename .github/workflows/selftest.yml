@@ -58,6 +58,8 @@ jobs:
           service: selftest
           environment: selftest
           delivery: pull
+          # The selftest digest is a placeholder that no registry serves.
+          registry-ready: 'false'
           existing-image: ghcr.io/devinosolutions/dokploy-release/selftest@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
       # A second call in the same run replaces the artifact (overwrite: true) instead of failing on its name.
       - id: second
@@ -66,6 +68,8 @@ jobs:
           service: selftest
           environment: selftest
           delivery: pull
+          # The selftest digest is a placeholder that no registry serves.
+          registry-ready: 'false'
           existing-image: ghcr.io/devinosolutions/dokploy-release/selftest@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
       - name: The manifest was delivered and the Deployment exists
         env:

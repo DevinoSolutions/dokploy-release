@@ -8,6 +8,7 @@ import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path";
 import { buildManifest, InputError } from "./build-manifest.mjs";
 import { createDeployments, DeploymentError } from "./create-deployments.mjs";
+import { parseReadyOptions, ReadyOptionError, RegistryNotReadyError, waitForRegistryReady } from "./registry-ready.mjs";
 
 // The line Dokploy looks for in the job log: `dokploy-release/v1 <payload>`. The payload is the UTF-8 bytes of the
 // compact manifest JSON, one letter per nibble (0 is "g", 15 is "v", high nibble first), so it only contains the
@@ -50,7 +51,37 @@ if (command === "manifest") {
 		if (upload !== "" && upload !== "true" && upload !== "false") {
 			throw new InputError('The input upload-artifact must be "true" or "false"');
 		}
+		const ready = parseReadyOptions(process.env);
 		const manifest = buildManifest(process.env);
+		// Wait until the registry serves every released digest before anything is published: Dokploy pulls it
+		// right after the release, and a registry can lag behind the push (GHCR: minutes for a new digest).
+		if (ready.enabled) {
+			if (ready.token !== "") console.log(`::add-mask::${ready.token}`);
+			const refs = manifest.services.flatMap((service) => service.images.map((image) => image.ref));
+			try {
+				await waitForRegistryReady({
+					refs,
+					token: ready.token,
+					tokenRegistry: ready.tokenRegistry,
+					timeoutSeconds: ready.timeoutSeconds,
+				});
+			} catch (error) {
+				// In push mode the workflow deploys by itself: a registry that is slow to serve the digest is a warning there.
+				if (error instanceof RegistryNotReadyError && delivery === "push") {
+					console.log(
+						`::warning title=dokploy-release::${oneLine(error.message)} The release continues without the readiness guarantee; the workflow's own deploy is not affected.`,
+					);
+				} else if (error instanceof RegistryNotReadyError) {
+					throw new RegistryNotReadyError(
+						`${error.message} Dokploy pulls this digest right after the release, so the release is refused.`,
+					);
+				} else {
+					throw error;
+				}
+			}
+		} else {
+			console.log("Registry readiness probe is off (registry-ready: false).");
+		}
 		mkdirSync(dir, { recursive: true });
 		writeFileSync(file, `${JSON.stringify(manifest, null, 2)}\n`);
 		output("path", file);
@@ -61,7 +92,11 @@ if (command === "manifest") {
 		// upload (Actions storage quota) Dokploy reads this line from the job log instead. Same manifest, same checks.
 		console.log(`${LOG_MARKER}${encodePayload(JSON.stringify(manifest))}`);
 	} catch (error) {
-		fail(error instanceof InputError ? error.message : `Unexpected error: ${error}`);
+		fail(
+			error instanceof InputError || error instanceof ReadyOptionError || error instanceof RegistryNotReadyError
+				? error.message
+				: `Unexpected error: ${error}`,
+		);
 	}
 } else if (command === "deploy") {
 	try {

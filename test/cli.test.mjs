@@ -19,6 +19,7 @@ const baseEnv = (dir, extra = {}) => ({
 	GITHUB_RUN_ID: "123",
 	GITHUB_RUN_ATTEMPT: "1",
 	GITHUB_EVENT_NAME: "push",
+	INPUT_REGISTRY_READY: "false",
 	INPUT_ENVIRONMENT: "development",
 	INPUT_SERVICE: "web",
 	INPUT_EXISTING_IMAGE: `registry.devino.ca/voicelabs/web@${D("e")}`,
@@ -147,4 +148,75 @@ test("manifest accepts upload-artifact false and still prints the log marker", (
 		});
 		assert.equal(result.status, 0);
 		assert.match(result.stdout, /^dokploy-release\/v1 [g-v]+$/m);
+	}));
+
+test("manifest with the probe on fails before writing anything when the registry never answers, naming the image", () =>
+	withDir((dir) => {
+		const image = `localhost:1/acme/web@${D("e")}`;
+		const result = spawnSync("node", [cli, "manifest"], {
+			env: baseEnv(dir, {
+				INPUT_REGISTRY_READY: "true",
+				INPUT_REGISTRY_READY_TIMEOUT: "0",
+				INPUT_REGISTRY_READY_TOKEN: "super-secret-token",
+				INPUT_EXISTING_IMAGE: image,
+			}),
+			encoding: "utf8",
+		});
+		assert.equal(result.status, 1, result.stdout + result.stderr);
+		assert.match(result.stdout, /::add-mask::super-secret-token/);
+		assert.match(result.stdout, /::error title=dokploy-release::.*localhost:1\/acme\/web@sha256:/);
+		assert.equal(readFileSync(join(dir, "out.txt"), "utf8"), "");
+		assert.ok(!result.stdout.replace("::add-mask::super-secret-token", "").includes("super-secret-token"));
+	}));
+
+test("manifest refuses a bad registry-ready value", () =>
+	withDir((dir) => {
+		const result = spawnSync("node", [cli, "manifest"], {
+			env: baseEnv(dir, { INPUT_REGISTRY_READY: "maybe" }),
+			encoding: "utf8",
+		});
+		assert.equal(result.status, 1);
+		assert.match(result.stdout, /registry-ready must be "true" or "false"/);
+	}));
+
+test("delivery push: a probe timeout is a warning and the manifest is still written; pull fails", () => {
+	const extra = {
+		INPUT_REGISTRY_READY: "true",
+		INPUT_REGISTRY_READY_TIMEOUT: "0",
+		INPUT_EXISTING_IMAGE: `localhost:1/acme/web@${D("e")}`,
+	};
+	withDir((dir) => {
+		const result = spawnSync("node", [cli, "manifest"], {
+			env: baseEnv(dir, { ...extra, INPUT_DELIVERY: "push" }),
+			encoding: "utf8",
+		});
+		assert.equal(result.status, 0, result.stdout + result.stderr);
+		assert.match(result.stdout, /::warning title=dokploy-release::.*localhost:1\/acme\/web@sha256:/);
+		assert.match(readFileSync(join(dir, "out.txt"), "utf8"), /^published=true$/m);
+	});
+	withDir((dir) => {
+		const result = spawnSync("node", [cli, "manifest"], {
+			env: baseEnv(dir, { ...extra, INPUT_DELIVERY: "pull" }),
+			encoding: "utf8",
+		});
+		assert.equal(result.status, 1);
+	});
+});
+
+test("delivery push still fails on an ambiguous registry-ready-token (several registries, none named)", () =>
+	withDir((dir) => {
+		const result = spawnSync("node", [cli, "manifest"], {
+			env: baseEnv(dir, {
+				INPUT_REGISTRY_READY: "true",
+				INPUT_REGISTRY_READY_TOKEN: "tok-123",
+				INPUT_DELIVERY: "push",
+				INPUT_SERVICES: "web\nworker",
+				INPUT_SERVICE: "",
+				INPUT_EXISTING_IMAGE: `web=ghcr.io/a/web@${D("e")}\nworker=registry.example.com/a/worker@${D("f")}`,
+			}),
+			encoding: "utf8",
+		});
+		assert.equal(result.status, 1, result.stdout);
+		assert.match(result.stdout, /several registries/);
+		assert.ok(!result.stdout.replace("::add-mask::tok-123", "").includes("tok-123"));
 	}));

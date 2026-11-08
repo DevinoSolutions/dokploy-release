@@ -34,6 +34,8 @@ jobs:
           environment: selftest
           delivery: pull
           upload-artifact: 'false'
+          # The selftest digest is a placeholder that no registry serves.
+          registry-ready: 'false'
           existing-image: ghcr.io/devinosolutions/dokploy-release/selftest@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
       - name: No artifact, and the Deployment exists
         env:
