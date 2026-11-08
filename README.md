@@ -55,6 +55,28 @@ Dokploy only verifies the release and advances its record of the deployed commit
 A bad input or configuration fails the step in both delivery modes. Only a network or API failure while creating the
 GitHub Deployment is a warning in `push` mode, so a GitHub outage never blocks a deploy your own workflow performs.
 
+## Registry readiness probe (v1.2.0)
+
+Before it writes the manifest, the action waits until the registry serves every released image: for each `registry/repo@sha256:digest`
+it sends `HEAD /v2/<repo>/manifests/<digest>` (OCI index/manifest and Docker manifest list/v2 accepted) and continues on a 200.
+A 401, 403 or 404 means "not yet" and is retried after 5, 10, 20, 30 and then every 30 seconds. One log line per attempt shows the status and the next wait.
+The anonymous pull token comes from `https://ghcr.io/token` for ghcr.io and from the registry's `WWW-Authenticate: Bearer` challenge for other registries;
+a registry that does not challenge is probed without authorization. Tokens are never printed.
+
+**Why the probe exists.** Dokploy polls GitHub Deployments and pulls the digest anonymously about 20 s after the release is published. GHCR can lag
+before a freshly pushed manifest is anonymously readable: a public package's new digest answered `denied: denied` 28 s after the push and was readable 11 minutes later.
+The deploy failed and a person had to re-run the publish job. A failed publish step is better than a release Dokploy cannot pull, so the probe fails the step
+(naming the image and the last HTTP status) when an image is still unreadable after `registry-ready-timeout`.
+
+| Input | Default | Meaning |
+|---|---|---|
+| `registry-ready` | `'true'` | `'false'` turns the probe off. |
+| `registry-ready-timeout` | `300` | Seconds to wait for each image (0 to 3600; 0 tries once). |
+| `registry-ready-token` | none | Registry bearer token sent as `Authorization: Bearer <token>` instead of the anonymous flow. Masked in the log, never echoed. |
+
+**Private packages** answer 401/403 to an anonymous HEAD forever and would hit the timeout. For them set `registry-ready: 'false'`, or pass
+`registry-ready-token` (a bearer token the registry accepts for that repository, for example from a secret).
+
 The action sets up Node 22 itself (self-hosted images often have no node on `PATH`).
 
 ## Files
@@ -64,7 +86,7 @@ The action sets up Node 22 itself (self-hosted images often have no node on `PAT
 | `action.yml` | The composite action. Third-party actions are pinned by commit sha. |
 | `schema/dokploy.release.v1.schema.json` | JSON Schema of the manifest. |
 | `fixtures/` | Valid and invalid manifests (`index.json` lists them). Dokploy vendors these and pins their hash. |
-| `scripts/` | `build-manifest.mjs`, `create-deployments.mjs`, `cli.mjs`, and the fixture generator and validator. |
+| `scripts/` | `build-manifest.mjs`, `create-deployments.mjs`, `registry-ready.mjs`, `cli.mjs`, and the fixture generator and validator. |
 
 Run `npm test` for the unit tests, `npm run fixtures` to regenerate the fixtures after a manifest change, and `npm run validate` to
 check them against the schema.

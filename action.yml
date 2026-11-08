@@ -38,6 +38,22 @@ inputs:
       Use false when the repository forbids actions/upload-artifact or has no artifact storage.
     required: false
     default: 'true'
+  registry-ready:
+    description: >-
+      true (default): before publishing, wait until the registry serves every released digest (an anonymous HEAD of
+      the manifest answers 200), because a registry can lag behind the push and Dokploy pulls right after the release.
+      false: skip the probe. Use false for private images unless you pass registry-ready-token.
+    required: false
+    default: 'true'
+  registry-ready-timeout:
+    description: Seconds the probe waits for each image before the step fails (0 to 3600).
+    required: false
+    default: '300'
+  registry-ready-token:
+    description: >-
+      Optional registry bearer token sent as Authorization Bearer instead of the anonymous token flow, for private images.
+      Never printed (masked in the log).
+    required: false
   github-token:
     description: Token used to create the Deployments. Needs deployments write.
     required: false
@@ -108,6 +124,9 @@ runs:
         INPUT_DELIVERY: ${{ inputs.delivery }}
         INPUT_COMPOSE: ${{ inputs.compose }}
         INPUT_UPLOAD_ARTIFACT: ${{ inputs.upload-artifact }}
+        INPUT_REGISTRY_READY: ${{ inputs.registry-ready }}
+        INPUT_REGISTRY_READY_TIMEOUT: ${{ inputs.registry-ready-timeout }}
+        INPUT_REGISTRY_READY_TOKEN: ${{ inputs.registry-ready-token }}
         INPUT_IMAGE: ${{ inputs.image }}
         INPUT_DOCKERFILE: ${{ inputs.dockerfile }}
         INPUT_CONTEXT: ${{ inputs.context }}
