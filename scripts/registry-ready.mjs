@@ -133,7 +133,15 @@ const anonymousToken = async (fetchImpl, budget, host, repo) => {
 		await response.body?.cancel?.().catch(() => {});
 		return { detail: `token endpoint HTTP ${response.status}` };
 	}
-	const body = await response.json().catch(() => null);
+	let body = null;
+	try {
+		body = await response.json();
+	} catch (error) {
+		// The request signal also covers reading the body: a stalled token endpoint is a timeout, not a missing token.
+		if (error?.name === "TimeoutError" || error?.name === "AbortError") {
+			return { detail: "token endpoint timed out" };
+		}
+	}
 	const token = body?.token ?? body?.access_token ?? null;
 	return typeof token === "string" && token !== "" ? { token } : { detail: "token endpoint HTTP 200 without a token" };
 };
@@ -192,7 +200,6 @@ const waitForRef = async ({ fetchImpl, ref, token, timeoutSeconds, now, sleep, l
 		if (wanted >= remaining) {
 			throw new RegistryNotReadyError(
 				`${ref} is not readable from the registry within ${timeoutSeconds} s (last answer: ${last}). ` +
-					"Dokploy pulls this digest right after the release, so the release is refused. " +
 					"For a private image set registry-ready: 'false' or pass registry-ready-token.",
 			);
 		}

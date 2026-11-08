@@ -68,7 +68,13 @@ if (command === "manifest") {
 			} catch (error) {
 				// In push mode the workflow deploys by itself: a registry that is slow to serve the digest is a warning there.
 				if (error instanceof RegistryNotReadyError && delivery === "push") {
-					console.log(`::warning title=dokploy-release::${oneLine(error.message)} The workflow's own deploy is not affected.`);
+					console.log(
+						`::warning title=dokploy-release::${oneLine(error.message)} The release continues without the readiness guarantee; the workflow's own deploy is not affected.`,
+					);
+				} else if (error instanceof RegistryNotReadyError) {
+					throw new RegistryNotReadyError(
+						`${error.message} Dokploy pulls this digest right after the release, so the release is refused.`,
+					);
 				} else {
 					throw error;
 				}

@@ -48,7 +48,7 @@ Rules the action enforces:
 - Several services are written `key=image` or `key/composeService=image`, one per line.
 - The run must come from a branch and from a `push` or a manual `workflow_dispatch`. Other events (`pull_request`, `pull_request_target`, `workflow_run`, `schedule`) are refused.
 - The inputs `image`, `dockerfile`, `context`, `builder`, `registry`, `mode`, `migrations`, `cache`, `environments`, `secrets`, `build-args` and `target` are reserved for later versions.
-  They are declared so that a typo cannot pass silently: any non-empty value fails the step with "not supported in v1".
+  They are declared so that a typo cannot pass silently: any non-empty value fails the step with "not supported in v2".
 
 `delivery: push` publishes the same manifest but tells Dokploy not to deploy it: your own workflow still deploys, and
 Dokploy only verifies the release and advances its record of the deployed commit.
@@ -79,11 +79,11 @@ The deploy failed and a person had to re-run the publish job. A failed publish s
 |---|---|---|
 | `registry-ready` | `'true'` | `'false'` turns the probe off. |
 | `registry-ready-timeout` | `300` | Seconds to wait for each image (0 to 3600; 0 tries once). |
-| `registry-ready-token` | none | Registry bearer token sent as `Authorization: Bearer <token>` instead of the anonymous flow. Masked in the log, never echoed. |
+| `registry-ready-token` | none | Registry bearer token sent as `Authorization: Bearer <token>` instead of the anonymous flow; for ghcr.io it must be a registry bearer token obtained from https://ghcr.io/token (or the base64 user:PAT form the registry accepts), not a raw GitHub token. Masked in the log, never echoed. |
 | `registry-ready-token-registry` | none | Host the token belongs to (for example `ghcr.io`). The token is sent only to that host. Empty: the token goes to the release's registry when every image is on one registry; with images on several registries and no host named, the step fails before probing. |
 
 **Private packages** answer 401/403 to an anonymous HEAD forever and would hit the timeout. For them set `registry-ready: 'false'`, or pass
-`registry-ready-token` (a bearer token the registry accepts for that repository, for example from a secret) and, with several registries, `registry-ready-token-registry`.
+`registry-ready-token` (a bearer token the registry accepts for that repository, for example from a secret; for ghcr.io it must be a registry bearer token obtained from https://ghcr.io/token (or the base64 user:PAT form the registry accepts), not a raw GitHub token) and, with several registries, `registry-ready-token-registry`.
 
 The action sets up Node 22 itself (self-hosted images often have no node on `PATH`).
 

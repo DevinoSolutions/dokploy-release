@@ -53,6 +53,7 @@ inputs:
   registry-ready-token:
     description: >-
       Optional registry bearer token sent as Authorization Bearer instead of the anonymous token flow, for private images.
+      For ghcr.io it must be a registry bearer token obtained from https://ghcr.io/token (or the base64 user:PAT form the registry accepts), not a raw GitHub token.
       Never printed (masked in the log).
     required: false
   registry-ready-token-registry:
@@ -65,40 +66,40 @@ inputs:
     required: false
     default: ${{ github.token }}
   image:
-    description: Reserved for a later version. Any non-empty value is refused in v1.
+    description: Reserved for a later version. Any non-empty value is refused in v2.
     required: false
   dockerfile:
-    description: Reserved for a later version. Any non-empty value is refused in v1.
+    description: Reserved for a later version. Any non-empty value is refused in v2.
     required: false
   context:
-    description: Reserved for a later version. Any non-empty value is refused in v1.
+    description: Reserved for a later version. Any non-empty value is refused in v2.
     required: false
   builder:
-    description: Reserved for a later version. Any non-empty value is refused in v1.
+    description: Reserved for a later version. Any non-empty value is refused in v2.
     required: false
   registry:
-    description: Reserved for a later version. Any non-empty value is refused in v1.
+    description: Reserved for a later version. Any non-empty value is refused in v2.
     required: false
   mode:
-    description: Reserved for a later version. Any non-empty value is refused in v1.
+    description: Reserved for a later version. Any non-empty value is refused in v2.
     required: false
   migrations:
-    description: Reserved for a later version. Any non-empty value is refused in v1.
+    description: Reserved for a later version. Any non-empty value is refused in v2.
     required: false
   cache:
-    description: Reserved for a later version. Any non-empty value is refused in v1.
+    description: Reserved for a later version. Any non-empty value is refused in v2.
     required: false
   environments:
-    description: Reserved for a later version. Any non-empty value is refused in v1.
+    description: Reserved for a later version. Any non-empty value is refused in v2.
     required: false
   secrets:
-    description: Reserved for a later version. Any non-empty value is refused in v1.
+    description: Reserved for a later version. Any non-empty value is refused in v2.
     required: false
   build-args:
-    description: Reserved for a later version. Any non-empty value is refused in v1.
+    description: Reserved for a later version. Any non-empty value is refused in v2.
     required: false
   target:
-    description: Reserved for a later version. Any non-empty value is refused in v1.
+    description: Reserved for a later version. Any non-empty value is refused in v2.
     required: false
 
 outputs:
