@@ -58,7 +58,21 @@ if (command === "manifest") {
 		if (ready.enabled) {
 			if (ready.token !== "") console.log(`::add-mask::${ready.token}`);
 			const refs = manifest.services.flatMap((service) => service.images.map((image) => image.ref));
-			await waitForRegistryReady({ refs, token: ready.token, timeoutSeconds: ready.timeoutSeconds });
+			try {
+				await waitForRegistryReady({
+					refs,
+					token: ready.token,
+					tokenRegistry: ready.tokenRegistry,
+					timeoutSeconds: ready.timeoutSeconds,
+				});
+			} catch (error) {
+				// In push mode the workflow deploys by itself: a registry that is slow to serve the digest is a warning there.
+				if (error instanceof RegistryNotReadyError && delivery === "push") {
+					console.log(`::warning title=dokploy-release::${oneLine(error.message)} The workflow's own deploy is not affected.`);
+				} else {
+					throw error;
+				}
+			}
 		} else {
 			console.log("Registry readiness probe is off (registry-ready: false).");
 		}

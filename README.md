@@ -29,7 +29,7 @@ Add one job after the job that pushes your image. Take the image from an output 
       contents: read
       deployments: write
     steps:
-      - uses: DevinoSolutions/dokploy-release@v1
+      - uses: DevinoSolutions/dokploy-release@v2
         with:
           service: shop
           environment: production
@@ -55,27 +55,35 @@ Dokploy only verifies the release and advances its record of the deployed commit
 A bad input or configuration fails the step in both delivery modes. Only a network or API failure while creating the
 GitHub Deployment is a warning in `push` mode, so a GitHub outage never blocks a deploy your own workflow performs.
 
-## Registry readiness probe (v1.2.0)
+## Registry readiness probe (v2.0.0)
+
+**v2.0.0 is a breaking change.** The probe is on by default, so a release whose image is private (an anonymous HEAD stays 401/403) now waits for
+`registry-ready-timeout` and then fails, where v1 passed. Callers that publish private images must set `registry-ready: 'false'` (or pass a token, below) when they move from `@v1` to `@v2`.
 
 Before it writes the manifest, the action waits until the registry serves every released image: for each `registry/repo@sha256:digest`
-it sends `HEAD /v2/<repo>/manifests/<digest>` (OCI index/manifest and Docker manifest list/v2 accepted) and continues on a 200.
-A 401, 403 or 404 means "not yet" and is retried after 5, 10, 20, 30 and then every 30 seconds. One log line per attempt shows the status and the next wait.
-The anonymous pull token comes from `https://ghcr.io/token` for ghcr.io and from the registry's `WWW-Authenticate: Bearer` challenge for other registries;
-a registry that does not challenge is probed without authorization. Tokens are never printed.
+it sends `HEAD /v2/<repo>/manifests/<digest>` (OCI index/manifest and Docker manifest list/v2 accepted). The image is ready on a 200 whose
+`Docker-Content-Digest` header equals the digest; a 200 without that header or with another digest is not ready. Redirects are never followed (a 3xx is not ready).
+Any other answer, 401, 403, 404, 5xx or a network error, means "not yet" and is retried after 5, 10, 20, 30 and then every 30 seconds.
+Every request is bounded by the time left, and no attempt starts at or after the `registry-ready-timeout` deadline.
+One log line per attempt shows what the registry answered and the next wait.
+The anonymous pull token comes from `https://ghcr.io/token` for ghcr.io and from the registry's `WWW-Authenticate: Bearer` challenge for other registries
+(`docker.io` and `index.docker.io` are probed on `registry-1.docker.io`, with `library/` added to one-segment names);
+a registry that does not challenge is probed without authorization. A token endpoint that answers 200 without a token counts as a failed attempt. Tokens are never printed.
 
 **Why the probe exists.** Dokploy polls GitHub Deployments and pulls the digest anonymously about 20 s after the release is published. GHCR can lag
 before a freshly pushed manifest is anonymously readable: a public package's new digest answered `denied: denied` 28 s after the push and was readable 11 minutes later.
-The deploy failed and a person had to re-run the publish job. A failed publish step is better than a release Dokploy cannot pull, so the probe fails the step
-(naming the image and the last HTTP status) when an image is still unreadable after `registry-ready-timeout`.
+The deploy failed and a person had to re-run the publish job. A failed publish step is better than a release Dokploy cannot pull, so with `delivery: pull` the probe fails the step
+(naming the image and the last answer) when an image is still unreadable after `registry-ready-timeout`. With `delivery: push` your own workflow deploys, so a timeout is a warning and the release continues.
 
 | Input | Default | Meaning |
 |---|---|---|
 | `registry-ready` | `'true'` | `'false'` turns the probe off. |
 | `registry-ready-timeout` | `300` | Seconds to wait for each image (0 to 3600; 0 tries once). |
 | `registry-ready-token` | none | Registry bearer token sent as `Authorization: Bearer <token>` instead of the anonymous flow. Masked in the log, never echoed. |
+| `registry-ready-token-registry` | none | Host the token belongs to (for example `ghcr.io`). The token is sent only to that host. Empty: the token goes to the release's registry when every image is on one registry; with images on several registries and no host named, the step fails before probing. |
 
 **Private packages** answer 401/403 to an anonymous HEAD forever and would hit the timeout. For them set `registry-ready: 'false'`, or pass
-`registry-ready-token` (a bearer token the registry accepts for that repository, for example from a secret).
+`registry-ready-token` (a bearer token the registry accepts for that repository, for example from a secret) and, with several registries, `registry-ready-token-registry`.
 
 The action sets up Node 22 itself (self-hosted images often have no node on `PATH`).
 

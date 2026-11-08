@@ -41,7 +41,8 @@ inputs:
   registry-ready:
     description: >-
       true (default): before publishing, wait until the registry serves every released digest (an anonymous HEAD of
-      the manifest answers 200), because a registry can lag behind the push and Dokploy pulls right after the release.
+      the manifest answers 200 with the matching Docker-Content-Digest), because a registry can lag behind the push and Dokploy pulls right after the release.
+      In delivery push a timeout is a warning, not a failure.
       false: skip the probe. Use false for private images unless you pass registry-ready-token.
     required: false
     default: 'true'
@@ -53,6 +54,11 @@ inputs:
     description: >-
       Optional registry bearer token sent as Authorization Bearer instead of the anonymous token flow, for private images.
       Never printed (masked in the log).
+    required: false
+  registry-ready-token-registry:
+    description: >-
+      Registry host that registry-ready-token belongs to (for example ghcr.io). The token is sent only to that host.
+      Empty: the token goes to the release's registry when all images are on one registry; with several registries it must be set.
     required: false
   github-token:
     description: Token used to create the Deployments. Needs deployments write.
@@ -127,6 +133,7 @@ runs:
         INPUT_REGISTRY_READY: ${{ inputs.registry-ready }}
         INPUT_REGISTRY_READY_TIMEOUT: ${{ inputs.registry-ready-timeout }}
         INPUT_REGISTRY_READY_TOKEN: ${{ inputs.registry-ready-token }}
+        INPUT_REGISTRY_READY_TOKEN_REGISTRY: ${{ inputs.registry-ready-token-registry }}
         INPUT_IMAGE: ${{ inputs.image }}
         INPUT_DOCKERFILE: ${{ inputs.dockerfile }}
         INPUT_CONTEXT: ${{ inputs.context }}

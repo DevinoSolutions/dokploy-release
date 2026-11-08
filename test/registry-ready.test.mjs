@@ -18,10 +18,16 @@ const makeFetch = (handler) => {
 	const calls = [];
 	const fetchImpl = async (url, init = {}) => {
 		calls.push({ url: String(url), method: init.method, headers: init.headers ?? {} });
+		calls[calls.length - 1].redirect = init.redirect;
 		const { status, json, headers } = handler(String(url), init, calls);
+		const out = { ...(headers ?? {}) };
+		// A registry that serves a manifest says which digest it is (Docker-Content-Digest); an empty value leaves the header out.
+		const manifest = String(url).match(/\/manifests\/(sha256:[0-9a-f]{64})$/);
+		if (status === 200 && manifest && !("docker-content-digest" in out)) out["docker-content-digest"] = manifest[1];
+		if (out["docker-content-digest"] === "") delete out["docker-content-digest"];
 		return {
 			status,
-			headers: new Headers(headers ?? {}),
+			headers: new Headers(out),
 			json: async () => json,
 			body: null,
 		};
@@ -70,6 +76,8 @@ test("ready on the first try: one token request, one HEAD with the accept header
 	assert.equal(calls.length, 2);
 	assert.equal(calls[0].url, "https://ghcr.io/token?scope=repository%3Aacme%2Fshop%3Apull");
 	assert.equal(calls[1].method, "HEAD");
+	assert.equal(calls[0].redirect, "manual");
+	assert.equal(calls[1].redirect, "manual");
 	assert.equal(calls[1].url, `https://ghcr.io/v2/acme/shop/manifests/${DIGEST}`);
 	assert.equal(calls[1].headers.Authorization, `Bearer ${SECRET}`);
 	for (const type of [
@@ -115,7 +123,7 @@ test("timeout: fails naming the image and the last status, last wait is clamped 
 		assert.ok(!error.message.includes(SECRET));
 		return true;
 	});
-	assert.deepEqual(clock.sleeps, [5, 10, 20, 5]);
+	assert.deepEqual(clock.sleeps, [5, 10, 20]); // the next attempt would start past the 40 s cap
 });
 
 test("timeout 0 tries once", async () => {
@@ -133,7 +141,7 @@ test("a network error is retried and reported", async () => {
 		}
 		n += 1;
 		if (n === 1) throw new TypeError("fetch failed");
-		return { status: 200, headers: new Headers(), body: null };
+		return { status: 200, headers: new Headers({ "docker-content-digest": DIGEST }), body: null };
 	};
 	const { promise, logs } = run({ refs: [GHCR], fetchImpl });
 	await promise;
@@ -213,7 +221,7 @@ test("several images each have their own wait; one never ready fails the whole p
 });
 
 test("parseReadyOptions: defaults, off switch, bad values", () => {
-	assert.deepEqual(parseReadyOptions({}), { enabled: true, timeoutSeconds: 300, token: "" });
+	assert.deepEqual(parseReadyOptions({}), { enabled: true, timeoutSeconds: 300, token: "", tokenRegistry: "" });
 	assert.equal(parseReadyOptions({ INPUT_REGISTRY_READY: "false" }).enabled, false);
 	assert.equal(parseReadyOptions({ INPUT_REGISTRY_READY: "TRUE" }).enabled, true);
 	assert.equal(parseReadyOptions({ INPUT_REGISTRY_READY_TIMEOUT: "90" }).timeoutSeconds, 90);
@@ -237,4 +245,146 @@ test("splitRef and parseBearerChallenge", () => {
 	assert.deepEqual(parseBearerChallenge('Bearer realm="https://a/t",service="s"'), { realm: "https://a/t", service: "s" });
 	assert.equal(parseBearerChallenge('Basic realm="x"'), null);
 	assert.equal(parseBearerChallenge(null), null);
+});
+
+test("docker.io refs are probed on registry-1.docker.io with the library/ prefix", async () => {
+	for (const [ref, repo] of [
+		[`docker.io/nginx@${DIGEST}`, "library/nginx"],
+		[`docker.io/library/nginx@${DIGEST}`, "library/nginx"],
+		[`index.docker.io/acme/shop@${DIGEST}`, "acme/shop"],
+		[`nginx@${DIGEST}`, "library/nginx"],
+	]) {
+		const { fetchImpl, calls } = makeFetch((url) => {
+			if (url === "https://registry-1.docker.io/v2/") {
+				return {
+					status: 401,
+					headers: { "www-authenticate": 'Bearer realm="https://auth.docker.io/token",service="registry.docker.io"' },
+				};
+			}
+			if (url.startsWith("https://auth.docker.io/token")) return { status: 200, json: { token: SECRET } };
+			return { status: 200 };
+		});
+		const { promise } = run({ refs: [ref], fetchImpl });
+		await promise;
+		assert.equal(calls[0].url, "https://registry-1.docker.io/v2/", ref);
+		assert.equal(new URL(calls[1].url).searchParams.get("scope"), `repository:${repo}:pull`, ref);
+		assert.equal(calls[2].url, `https://registry-1.docker.io/v2/${repo}/manifests/${DIGEST}`, ref);
+	}
+	assert.deepEqual(splitRef(`docker.io/nginx@${DIGEST}`), {
+		host: "registry-1.docker.io",
+		repo: "library/nginx",
+		digest: DIGEST,
+	});
+});
+
+test("a redirect is not followed and counts as not ready", async () => {
+	const { fetchImpl } = makeFetch(ghcrHandler([302, 200]));
+	const { promise, logs } = run({ refs: [GHCR], fetchImpl });
+	await promise;
+	assert.match(logs[0], /HTTP 302/);
+});
+
+test("a 200 without a Docker-Content-Digest header, or with another digest, is not ready", async () => {
+	const other = `sha256:${"c".repeat(64)}`;
+	for (const [bad, pattern] of [
+		["", /without Docker-Content-Digest/],
+		[other, /Docker-Content-Digest sha256:c+, not sha256:a+/],
+	]) {
+		const { fetchImpl } = makeFetch((url) =>
+			url.startsWith("https://ghcr.io/token")
+				? { status: 200, json: { token: SECRET } }
+				: { status: 200, headers: { "docker-content-digest": bad } },
+		);
+		const { promise } = run({ refs: [GHCR], fetchImpl, timeoutSeconds: 10 });
+		await assert.rejects(promise, (error) => {
+			assert.match(error.message, pattern);
+			assert.ok(error.message.includes(GHCR));
+			return true;
+		});
+	}
+});
+
+test("a token endpoint that answers 200 without a token is a failed attempt and sends no manifest request", async () => {
+	for (const json of [{}, { token: "" }, null]) {
+		let n = 0;
+		const { fetchImpl, calls } = makeFetch((url) => {
+			if (url.startsWith("https://ghcr.io/token")) {
+				n += 1;
+				return n === 1 ? { status: 200, json } : { status: 200, json: { token: SECRET } };
+			}
+			return { status: 200 };
+		});
+		const { promise, logs } = run({ refs: [GHCR], fetchImpl });
+		await promise;
+		assert.match(logs[0], /token endpoint HTTP 200 without a token/);
+		assert.equal(calls.filter((call) => call.method === "HEAD").length, 1);
+	}
+});
+
+test("registry-ready-token goes only to the named registry", async () => {
+	const other = `registry.example.com/team/app@${DIGEST}`;
+	const { fetchImpl, calls } = makeFetch((url) =>
+		url.startsWith("https://ghcr.io/token") ? { status: 200, json: { token: "anon-ghcr" } } : { status: 200 },
+	);
+	const { promise } = run({ refs: [GHCR, other], fetchImpl, token: SECRET, tokenRegistry: "registry.example.com" });
+	await promise;
+	const heads = calls.filter((call) => call.method === "HEAD");
+	assert.equal(heads.find((call) => call.url.startsWith("https://ghcr.io")).headers.Authorization, "Bearer anon-ghcr");
+	assert.equal(
+		heads.find((call) => call.url.startsWith("https://registry.example.com")).headers.Authorization,
+		`Bearer ${SECRET}`,
+	);
+	assert.ok(!calls.some((call) => call.url.startsWith("https://ghcr.io") && JSON.stringify(call.headers).includes(SECRET)));
+});
+
+test("registry-ready-token without a named registry: used on the only registry, refused before any request with several", async () => {
+	const { fetchImpl, calls } = makeFetch(() => ({ status: 200 }));
+	const one = run({ refs: [`registry.example.com/a@${DIGEST}`], fetchImpl, token: SECRET });
+	await one.promise;
+	assert.equal(calls[0].headers.Authorization, `Bearer ${SECRET}`);
+
+	calls.length = 0;
+	const many = run({ refs: [GHCR, `registry.example.com/a@${DIGEST}`], fetchImpl, token: SECRET });
+	await assert.rejects(many.promise, (error) => {
+		assert.ok(error instanceof ReadyOptionError);
+		assert.match(error.message, /several registries.*ghcr.io.*registry.example.com.*registry-ready-token-registry/);
+		assert.ok(!error.message.includes(SECRET));
+		return true;
+	});
+	assert.equal(calls.length, 0);
+
+	const wrong = run({ refs: [GHCR], fetchImpl, token: SECRET, tokenRegistry: "nowhere.example.com" });
+	await assert.rejects(wrong.promise, ReadyOptionError);
+	assert.equal(calls.length, 0);
+});
+
+test("the token registry input is normalised and needs a token", () => {
+	const env = { INPUT_REGISTRY_READY_TOKEN: "t", INPUT_REGISTRY_READY_TOKEN_REGISTRY: "Docker.io" };
+	assert.equal(parseReadyOptions(env).tokenRegistry, "registry-1.docker.io");
+	assert.throws(() => parseReadyOptions({ INPUT_REGISTRY_READY_TOKEN_REGISTRY: "ghcr.io" }), ReadyOptionError);
+});
+
+test("slow requests: every request gets an abort signal and no attempt starts past the deadline", async () => {
+	let time = 0;
+	let signals = 0;
+	const fetchImpl = async (url, init) => {
+		if (init.signal instanceof AbortSignal) signals += 1;
+		time += 15_000; // a slow registry: every request takes 15 s
+		return { status: 403, headers: new Headers(), body: null, json: async () => ({ token: SECRET }) };
+	};
+	await assert.rejects(
+		waitForRegistryReady({
+			refs: [GHCR],
+			fetchImpl,
+			timeoutSeconds: 40,
+			now: () => time,
+			sleep: async (ms) => {
+				time += ms;
+			},
+			log: () => {},
+		}),
+		RegistryNotReadyError,
+	);
+	assert.ok(signals >= 2);
+	assert.ok(time < 40_000 + 30_000, `ran until ${time} ms`);
 });
